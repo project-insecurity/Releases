@@ -1,0 +1,92 @@
+                    + Taking Advantage of Live Chat Leaks +
+
+
+            Written by Cody Zacharias (@now) and Kane Gamble (@kane_gamble)
+
+                                      ~~~
+
+--[ Table of Contents
+
+  1 - Introduction
+  2 - Information Disclosure
+  3 - Proof of Concept
+      3.1 - LiveChat Software (LiveChatInc)
+      3.2 - TouchCommerce
+  4 - Business Impact
+  5 - Who is Affected?
+
+--[ 1 - Introduction
+
+Kane Gamble and Cody Zacharias discovered information disclosure vulnerabilities
+in live chat software by LiveChat Software (LiveChatInc), TouchCommerce (formerly
+inQ, inc. and recently acquired by Nuance Communications), LivePerson, and many
+others.
+
+Vendors were notified of security issues present in their live chat software, or
+at least contact attempts were made. Vendors mentioned in this paper have not
+fixed the vulnerabilities disclosed.
+
+--[ 2 - Information Disclosure
+
+Each live chat software is affected the same way. Significant information about
+the employee/agent you're communicating with is detailed in the responses of
+POST requests that are made when chatting with the agent. The information 
+disclosure bugs in the live chat software exist because there are no steps taken
+to prevent information about the person you're chatting with from being mentioned
+in the responses.
+
+The type of information being disclosed is dependent on the company/website
+using the live chat software. Some examples of information we've seen being
+disclosed include:
+
+- Employee's full name
+- Employee's supervisor and managers
+- Employee's ID
+- Employee's supervisor and manager's employee ID
+- Employee's location
+- Center name
+- Employee's email
+- Indications of other tools/programs the employee is using
+
+This data can be retrieved by inspecting the requests made during a live
+chat session with browser networking tools or Burp Suite.
+
+--[ 3 - Proof of Concept
+
+Parts of each sample have been redacted with ****. 
+
+----[ 3.1 - LiveChat Software (LiveChatInc)
+
+This sample is taken from Google Fiber's live chat. The information being disclosed
+include the employee's name and email address belonging to their account. In some
+cases, the email address disclosed is a personal email, not a work email address.
+
+jQuery111304544368839391404_1501150342048({"messages":[{"timestamp":1501150382,"unique_id":2,"message":{"name":"start_chat","data":{"visitor":{"id":"S1501150342.5b78b0fe92","nick":"GoD","email":"GoD@mail.com"},"group":2,"source_group":2,"version":"Embedded","custom_variables":{},"integration_params":"","from_manual_invitation":false,"trigger_unique_id":"","welcome_message":"Hello GoD, one moment while we connect you with a Google Fiber team member. ","is_mobile":false,"return_secured_session_id":false,"random_id":"1501150381705RiVFZ16"}}},{"timestamp":1501150382,"unique_id":1,"message_iwcs":"FUC00002K^si*****x@google.com^C****^0^911595^^^0^^0^0^^FU014420CK^1^^^si*****x@google.com;^0^^^^1^1^livechat.s3.amazonaws.com/7251891/avatars/fd8043b7ab99171c3297865686ee6325.png^^Support Agent^"}]});
+
+----[ 3.2 - TouchCommerce
+
+This sample is taken from Verizon's live chat. The information being disclosed include
+the employee's full name, employee ID, supervisor's name, supervisor's EID, managers,
+center name and location. There is also indication that the employee is using CoFEE,
+a Verizon employee tool used to lookup customer records.
+
+{"messages":[{"state":"assigned","agentID":"3********1@verizon","agent.alias":"Daley","messageType":"stateChange","agentGroupID":"1000****","engagementID":"725742275********","host.node.id":"172.31.10.26","public_user_id":"42314***","agentAttributes":"CoFEE=true,CenterType=Partner,AgentSalesCode=VZID,Director=LUCAS_*****,Team=W******N_G***GE,Vendor=Tech ********a,OpsManager=S**********H,SupervisorEID=028********,AgentLocation=H**********,CenterName=D**************M Hyd","agent.site_attrs":"CoFEE=true,CenterType=Partner,AgentSalesCode=VZID,Director=LUCAS_******,Team=W********N_G****E,Vendor=Tech *****a,OpsManager=S*********H,SupervisorEID=028*******,AgentLocation=H***********,CenterName=D**************M Hyd","business_unit.id":"1900****","cobrowse.enabled":"true","ar_event_send_time":"1522595864750","chatrouter.address":"172.31.10.26","event.agent_last_name":"B******","event.agent_first_name":"Daley","msg.originalrequest.id":"727994074616*****","event.initial_request_attributes":""}], "count":3}
+
+--[ 4 - Business Impact
+
+The type of information being exposed is everything a person would need to successfully
+perform social engineering attacks against the company by using an employee's real
+information such as their full name, employee ID and supervisor's name to impersonate them.
+This could lead to somebody gaining access to employee tools and even allow them to gain a
+foothold in the internal network.
+
+--[ 5 - Who is Affected?
+
+Some companies affected using TouchCommerce live chat [1]:
+- Sprint, AT&T, Verizon, Bell, Cox Communications, Bank of America, Merrill Lynch, Citizen's Bank, etc.
+
+Some companies affected using LiveChat Software [2]:
+- Google Fiber, Kaspersky Labs, Bitdefender, TorGuard VPN, etc.
+
+[1] http://web.archive.org/web/20160618000435/http://www.touchcommerce.com:80/about-us/select-client-list
+[2] https://www.livechatinc.com/customers/
