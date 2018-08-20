@@ -1,6 +1,6 @@
 		The pwnage of Canadian IP Relay 	
 		     by Dominik Penner		
-			      @Insecurity
+			@Insecurity
 
 
 
